@@ -1,0 +1,11 @@
+#!/bin/sh
+(
+cd /home/deconti/Workspace/DFCI-CCCB-Plexwell-pipeline/cromwell-executions/PlexwellProcessing/ce778bb3-d9c4-4da0-868b-33a82ee5d435/call-test_map/shard-0/execution
+echo -e "A\t1" > A.txt
+)
+echo $? > /home/deconti/Workspace/DFCI-CCCB-Plexwell-pipeline/cromwell-executions/PlexwellProcessing/ce778bb3-d9c4-4da0-868b-33a82ee5d435/call-test_map/shard-0/execution/rc.tmp
+(
+cd /home/deconti/Workspace/DFCI-CCCB-Plexwell-pipeline/cromwell-executions/PlexwellProcessing/ce778bb3-d9c4-4da0-868b-33a82ee5d435/call-test_map/shard-0/execution
+
+)
+mv /home/deconti/Workspace/DFCI-CCCB-Plexwell-pipeline/cromwell-executions/PlexwellProcessing/ce778bb3-d9c4-4da0-868b-33a82ee5d435/call-test_map/shard-0/execution/rc.tmp /home/deconti/Workspace/DFCI-CCCB-Plexwell-pipeline/cromwell-executions/PlexwellProcessing/ce778bb3-d9c4-4da0-868b-33a82ee5d435/call-test_map/shard-0/execution/rc
