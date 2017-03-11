@@ -1,3 +1,11 @@
 {
-
+  "PlexwellProcessing.ref_pac": "/run/media/ddeconti/Data/ddeconti/farline/FireCloud/hg19.fa.pac",
+  "PlexwellProcessing.ref_fasta_index": "/run/media/ddeconti/Data/ddeconti/farline/FireCloud/hg19.fa.fai",
+  "PlexwellProcessing.ref_amb": "/run/media/ddeconti/Data/ddeconti/farline/FireCloud/hg19.fa.amb",
+  "PlexwellProcessing.ref_sa": "/run/media/ddeconti/Data/ddeconti/farline/FireCloud/hg19.fa.sa",
+  "PlexwellProcessing.ref_bwt": "/run/media/ddeconti/Data/ddeconti/farline/FireCloud/hg19.fa.bwt",
+  "PlexwellProcessing.inputs_tsv": "/run/media/ddeconti/Data/ddeconti/farline/FireCloud/inputs.tsv",
+  "PlexwellProcessing.ref_dict": "/run/media/ddeconti/Data/ddeconti/farline/FireCloud/hg19.dict",
+  "PlexwellProcessing.ref_fasta": "/run/media/ddeconti/Data/ddeconti/farline/FireCloud/hg19.fa",
+  "PlexwellProcessing.ref_ann": "/run/media/ddeconti/Data/ddeconti/farline/FireCloud/hg19.fa.ann"
 }

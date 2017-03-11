@@ -17,6 +17,11 @@ workflow PlexwellProcessing {
         input:
             to_map = test_map.mapping_tsv
     }
+    call echo_the_map {
+        input:
+            the_map = write_foo_map.the_map,
+            key = "A"
+    }
 }
 
 ##############################################################################
@@ -44,5 +49,18 @@ task write_foo_map {
     output {
         File output_tsv = "output.tsv"
         Map[String, String] the_map = read_map("output.tsv")
+    }
+}
+
+task echo_the_map {
+    Map[String, String] the_map
+    String key
+    String val = the_map[key]
+
+    command {
+        echo "${val}" > output.txt
+    }
+    output {
+        File output_file = "output.txt"
     }
 }

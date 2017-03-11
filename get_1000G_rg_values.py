@@ -11,17 +11,18 @@ def print_rg(filename, sample_name):
     '''
     Parses first line plus sample_name to print RG values.
     '''
+    #@ERR031964.6 B81C73ABXX:2:1101:1270:2549#TTAGGCAN/1
     with gzip.open(filename, "rU") as handle:
         line = handle.readline()
         arow = line.strip('\n').split()
-        info = arow[0].split(':')
+        info = arow[1][:-2].split(':')
         instrument_id = info[0]
-        run_id = info[1]
-        flowcell_id = info[2]
-        flowcell_lane = info[3]
-        index_seq = arow[1].split(':')[3]
-    rgid = '.'.join([sample_name, flowcell_id, flowcell_lane])
-    rglb = '.'.join([sample_name, run_id])
+        #run_id = info[1]
+        #flowcell_id = info[2]
+        flowcell_lane = info[1]
+        index_seq = arow[1][:-2].split('#')[1]
+    rgid = '.'.join([sample_name, flowcell_lane])
+    rglb = '.'.join([sample_name, instrument_id, flowcell_lane])
     rgpu = '.'.join([instrument_id,
                      flowcell_lane,
                      index_seq])
