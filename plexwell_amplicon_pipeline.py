@@ -5,57 +5,158 @@ Main entry for plexwell amplicon analysis.
 
 from collections import defaultdict
 import argparse
+import gzip
+import itertools
 import os
 import re
 import subprocess
 import sys
 
 
-def align_reads(project_dir, bam_dir, ref_genome):
+def align_reads(dir_map, fastq_tsv, ref_genome, bin_map, dry=False):
     '''
     Aligns reads from fastqs.
     '''
-    fastq_dir = '/'.join([project_dir, "fastq_symlinks"])
-    # Checks for existence of fastq_dir, otherwise creates it in output_dir.
-    if not os.path.isdir(fastq_dir):
-        sys.stderr.write("Error: fastq symlink dir does not exist.\n")
-        sys.stderr.write("       Creating symlink dir.\n")
-        # TODO create symlinks for fastq
-    mapped_fastqs = get_fastqs(fastq_dir)
+    fastq_map = map_fastq_from_tsv(fastq_tsv)
+    samplename_map = dict((v, k) for k in fastq_map for v in fastq_map[k])
+    fastqs = itertools.chain.from_iterable(fastq_map.values())
+    mapped_fastqs = map_fastq_pairs(fastqs)
+    bams = []
     for first, second in mapped_fastqs:
-        basename = re.sub('_R[1-2]_.final.fastq.gz', '', first)
-        bwa = "/ifs/labs/cccb/projects/cccb/apps/bwa-0.7.12/bwa"
-        samtools = "/ifs/labs/cccb/projects/cccb/apps/samtools-1.2-5/samtools"
-        sam = '.'.join([basename, "sam"])
-        first, second, sam = ['/'.join([bam_dir, b])
-                              for b in [first, second, sam]]
-        cmd = ' '.join([bwa, 'mem -t 10', ref_genome, first, second, '|',
-                        samtools, "view -bht", "|",
-                        samtools, "sort -@ 10", ">", sam])
-        print(cmd)
+        sample_name = samplename_map[first]
+        basename = re.sub(r'_R[1-2]_[0-9]+\.fastq.gz', '', first)
+        basename = '/'.join([dir_map["indbamdir"], basename.split('/')[-1]])
+        try:
+            bwa = bin_map["bwa"]
+            samtools = bin_map["samtools"]
+        except KeyError as err:
+            sys.stderr.write(err + "\n")
+            sys.exit()
+        bam = '.'.join([basename, "bam"])
+        rg_vals = get_rg_values(sample_name, first)
+        cmd = ' '.join([bwa, 'mem -R \"%s\"' % rg_vals,
+                        ref_genome, first, second, '|',
+                        samtools, "view -bht", ref_genome, "|",
+                        samtools, "sort", ">", bam])
+        if dry:
+            sys.stdout.write(cmd + '\n')
+        else:
+            subprocess.call(cmd, shell=True)
+        bams.append(bam)
+    return map_bams_to_sample(samplename_map, bams, dir_map["indbamdir"])
 
 
-def create_symlink(root, link_path, file):
+def call_variants_from_bams(bams, ref_genome, dir_map, bin_map, dry=False):
+    '''
+    Pipes samtools mpileup of bam to varscan.
+    '''
+    java = bin_map["java"]
+    samtools = bin_map["samtools"]
+    varscan = bin_map["varscan"]
+    vcfs = []
+    for bam in bams:
+        vcf = '/'.join([dir_map["vcfdir"],
+                        re.sub(r"\.bam", ".vcf", bam.split('/')[-1])])
+        #snps = '/'.join([dir_map["vcfdir"],
+        #                 re.sub(r"\.bam", ".snps.vcf", bam.split('/')[-1])])
+        #indels = '/'.join([dir_map["vcfdir"],
+        #                   re.sub(r"\.bam", ".indels.vcf",
+        #                          bam.split('/')[-1])])
+        cmd = ' '.join([samtools, "mpileup -B -f", ref_genome, bam, "|",
+                        java, "-jar", varscan,
+                        "mpileup2cns --p-value 99e-02 --variants 1",
+                        ">", vcf])
+        #cmd1 = ' '.join([samtools, "mpileup -B -f", ref_genome, bam, "|",
+        #                 java, "-jar", varscan,
+        #                 "mpileup2snp --p-value 99e-02", ">", snps])
+        #cmd2 = ' '.join([samtools, "mpileup -B -f", ref_genome, bam, "|",
+        #                 java, "-jar", varscan,
+        #                 "mpileup2indel --p-value 99e-02", ">", indels])
+        if dry:
+            #sys.stdout.write(cmd1 + '\n' + cmd2 + '\n')
+            sys.stdout.write(cmd + '\n')
+        else:
+            subprocess.call(cmd, shell=True)
+            #subprocess.call(cmd1, shell=True)
+            #subprocess.call(cmd2, shell=True)
+    return vcfs
+
+
+def create_symlink(root, link_path, filename):
     '''
     Creates a symlink given root path, final path, and filename.
     '''
-    os.symlink('/'.join([root, file]),
-               '/'.join([link_path, file]))
+    os.symlink('/'.join([root, filename]),
+               '/'.join([link_path, filename]))
+
+def get_rg_values(sample_name, fastq):
+    '''
+    Parses gzipped fastq for RG values and returns RG str for BWA.
+    '''
+    with gzip.open(fastq, 'rU') as handle:
+        line = handle.readline()
+        arow = line.strip('\n').split()
+        info = arow[0].split(':')[1:]
+        instrument_id = info[0]
+        run_id = info[1]
+        flowcell_id = info[2]
+        flowcell_lane = info[3]
+        index_seq = arow[1].split(':')[3]
+        rgid = '.'.join([sample_name, flowcell_id, flowcell_lane])
+    rglb = '.'.join([sample_name, run_id])
+    rgpu = '.'.join([instrument_id,
+                     flowcell_lane,
+                     index_seq])
+    rgsm = sample_name
+    rgcn = "DFCI-CCCB"
+    rgpl = "ILLUMINA"
+    rg_vals = "@RG\\tID:" + rgid + "\\tPL:" + rgpl + "\\tLB:" + \
+              rglb + "\\tSM:" + rgsm + "\\tCN:" + rgcn + "\\tPU:" + rgpu
+    return rg_vals
 
 
-def get_fastqs(fastq_dir):
+def map_bams_to_sample(samplename_map, bams, bam_dir):
+    '''
+    Maps bam to sample_names.
+    '''
+    sample_to_bam_map = {}
+    for key, value in samplename_map.items():
+        bam = re.sub(r'_R[1-2]_[0-9]+\.fastq.gz', '', key).split('/')[-1] + ".bam"
+        new_key = '/'.join([bam_dir, bam])
+        sample_to_bam_map[new_key] = value
+    bam_to_sample_map = defaultdict(list)
+    for bam in bams:
+        if bam in sample_to_bam_map:
+            samplename = sample_to_bam_map[bam]
+            bam_to_sample_map[samplename].append(bam)
+    return bam_to_sample_map
+
+
+def map_fastq_from_tsv(fastq_tsv):
+    '''
+    Parses tsv into map of sample name and lane specific fastq.
+    '''
+    fastq_map = defaultdict(list)
+    with open(fastq_tsv, 'rU') as handle:
+        for line in handle:
+            arow = line.strip('\n').split('\t')
+            sample = arow[0]
+            fastq = arow[1]
+            fastq_map[sample].append(fastq)
+    return fastq_map
+
+
+def map_fastq_pairs(fastqs):
     '''
     Gets fastqs from fastq dir and returns dict (k=first, v=second).
     '''
-    fastqs = [f for f in os.listdir(fastq_dir)
-              if os.path.isfile(os.path.join(fastq_dir, f))]
     first_read_fastqs = [f for f in fastqs if re.search("_R1_", f)]
     second_read_fastqs = [f for f in fastqs if re.search("_R2_", f)]
     basenames_map = {f.replace("_R2_", "") : f for f in second_read_fastqs}
-    return map_fastq_pairs(first_read_fastqs, basenames_map)
+    return map_read_by_basename(first_read_fastqs, basenames_map)
 
 
-def map_fastq_pairs(first_reads, basenames_map):
+def map_read_by_basename(first_reads, basenames_map):
     '''
     Maps first reads to second reads and maps.
     '''
@@ -72,6 +173,54 @@ def map_fastq_pairs(first_reads, basenames_map):
     seconds = [[basenames_map[b], ""] for b in basenames_map if b not in in_map]
     mapped_fastq.extend(seconds)
     return mapped_fastq
+
+
+def merge_bams(bams_to_sample_map, dir_map, bin_map, dry=False):
+    '''
+    Merges the individual bams into a sample bam.
+    '''
+    merged_bams = []
+    try:
+        samtools = bin_map["samtools"]
+    except KeyError as err:
+        sys.stderr.write(err + '\n')
+        sys.exit()
+    for samplename, bams in bams_to_sample_map.items():
+        input_bams = ' '.join(bams)
+        output_bam = '/'.join([dir_map["bamdir"], samplename + ".bam"])
+        cmd1 = ' '.join([samtools, "merge", output_bam, input_bams])
+        cmd2 = ' '.join([samtools, "index", output_bam])
+        if dry:
+            sys.stdout.write(cmd1 + '\n' + cmd2 + '\n')
+        else:
+            subprocess.call(cmd1, shell=True)
+            subprocess.call(cmd2, shell=True)
+        merged_bams.append(output_bam)
+    return merged_bams
+
+
+def realign_indels(bams, ref_genome, bin_map, dry=False):
+    '''
+    Realigns indels with GATK.
+    '''
+    java = bin_map["java"]
+    gatk = bin_map["gatk"]
+    realn_bams = []
+    for bam in bams:
+        realn_intervals = re.sub(r"\.bam", "_indelrealn.intervals", bam)
+        realn_bam = re.sub(r"\.bam", ".indelrealn.bam", bam)
+        cmd1 = ' '.join([java, "-jar", gatk, "-T RealignerTargetCreator",
+                         "-R", ref_genome, "-I", bam, "-o", realn_intervals])
+        cmd2 = ' '.join([java, "-jar", gatk, "-T IndelRealigner",
+                         "-R", ref_genome, "-I", bam,
+                         "-targetIntervals", realn_intervals, "-o", realn_bam])
+        if dry:
+            sys.stdout.write(cmd1 + '\n' + cmd2 + '\n')
+        else:
+            subprocess.call(cmd1, shell=True)
+            subprocess.call(cmd2, shell=True)
+        realn_bams.append(realn_bam)
+    return realn_bams
 
 
 def setup_dir(cur_dir, out_dir_name):
@@ -91,8 +240,19 @@ def setup_dir(cur_dir, out_dir_name):
         sys.exit()
     out_dir = '/'.join([cur_dir, out_dir_name])
     bam_dir = '/'.join([out_dir, "bam_files"])
+    indbam_dir = '/'.join([bam_dir, "individual_bam_files"])
+    pileup_dir = '/'.join([out_dir, "pileups"])
+    vcf_dir = '/'.join([out_dir, "vcfs"])
     os.makedirs(bam_dir)
-    return {"bamdir": bam_dir}
+    os.makedirs(indbam_dir)
+    os.makedirs(pileup_dir)
+    os.makedirs(vcf_dir)
+    return {"bamdir": bam_dir,
+            "outdir": out_dir,
+            "projdir": cur_dir,
+            "indbamdir": indbam_dir,
+            "pileupdir": pileup_dir,
+            "vcfdir": vcf_dir}
 
 
 def main():
@@ -100,6 +260,8 @@ def main():
     Parses CLI args and central dispatch of functions.
     '''
     parser = argparse.ArgumentParser(description="Plexwell amplicon analysis")
+    parser.add_argument("fastqtsv", metavar="FastqTSV",
+                        help="lane specific fastq TSV")
     parser.add_argument("-d", "--projectdir",
                         metavar="PROJECT_DIR",
                         help="project directory; default: .")
@@ -108,12 +270,32 @@ def main():
                         help="output dir; relative to -d; default: plexout")
     parser.add_argument("-g", "--genome",
                         help="genome [hg19,]; default: hg19")
+    parser.add_argument("--dry",
+                        action="store_true",
+                        help="Creates dirs, but no file creation")
     parser.set_defaults(projectdir=".", outdir="plexout", genome="hg19")
     args = parser.parse_args()
-
     # Setup process
-    setup_dir(args.projectdir, args.outdir)
-    align_reads(args.projectdir, args.outdir, "foo.fa")
+    dir_map = setup_dir(args.projectdir, args.outdir)
+    #bwa = "/ifs/labs/cccb/projects/cccb/apps/bwa-0.7.12/bwa"
+    #samtools = "/ifs/labs/cccb/projects/cccb/apps/samtools-1.2-5/samtools"
+    #bwa = "~/bin/bwa"
+    #samtools = "~/bin/samtools"
+    bin_map = {"samtools": "~/bin/samtools",
+               "bwa": "~/bin/bwa",
+               "java": "~/bin/java",
+               "gatk": "~/bin/gatk.jar",
+               "varscan": "~/bin/varscan.jar",}
+    # TODO change ref at later point
+    #ref_map = {"hg19": ""}    
+    indvbams_to_samplename_map = align_reads(dir_map, args.fastqtsv,
+                                             "hg19.fa", bin_map,
+                                             args.dry)
+    merged_bams = merge_bams(indvbams_to_samplename_map, dir_map, bin_map,
+                             args.dry)
+    indelrealn_bams = realign_indels(merged_bams, "hg19.fa", bin_map, args.dry)
+    call_variants_from_bams(indelrealn_bams, "hg19.fa", dir_map, bin_map,
+                            args.dry)
 
 
 if __name__ == "__main__":
