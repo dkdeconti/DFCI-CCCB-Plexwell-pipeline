@@ -10,6 +10,7 @@ import itertools
 import os
 import jinja2
 import re
+import shutil
 import subprocess
 import sys
 
@@ -80,6 +81,26 @@ def call_variants_from_bams(bams, ref_genome, dir_map, bin_map, dry=False):
     return snp_vcfs, indel_vcfs
 
 
+def cluster_regions(bams, min_mean_depth, dir_map, bin_map, dry=False):
+    '''
+    Determines specific amplicon by min_mean_coverage.
+    '''
+    coverage_dir = dir_map["coveragedir"]
+    bedtools = bin_map["bedtools"]
+    beds = []
+    clusters = defaultdict(list)
+    for bam in bams:
+        samplename = bam.split('/')[-1]
+        bed = '/'.join([coverage_dir,
+                        re.sub(r"\.indelrealn\.bam", ".bed", samplename)])
+        cmd = ' '.join([bedtools, "merge -i", bam, "| head -n -1 |",
+                        bedtools, "coverage -a - -b", bam, ">", bed])
+        subprocess.call(cmd, shell=True)
+        beds.append(bed)
+        clusters[samplename] = filter_clusters(bed, min_mean_depth)
+    return beds, clusters
+
+
 def create_symlink(root, link_path, filename):
     '''
     Creates a symlink given root path, final path, and filename.
@@ -92,17 +113,23 @@ def create_report(snps, indels, dir_map):
     '''
     Injects data into html template with jinja2.
     '''
-    proj_dir = dir_map["projdir"]
+    this_dir = os.path.dirname(os.path.realpath(__file__))
+    lib_dir = os.path.join(this_dir, 'lib')
     report_dir = dir_map["reportdir"]
+    lib_destination = os.path.join(report_dir, 'lib')
     report = '/'.join([report_dir, "html_report.html"])
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader(proj_dir))
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(this_dir))
     # can't seem to find template.html
     template = env.get_template("template.html")
-    samples = {samplename : {"snps" : variants, "name": samplename}
-               for samplename, variants in snps.items()}
+    samples = {samplename : {"header" : snps[samplename][0],
+                             "snps" : snps[samplename][1:],
+                             "indels" : indels[samplename][1:],
+                             "samplename": samplename.split('/')[-1]}
+               for samplename in snps.keys()}
     context = {"samples": samples}
     with open(report, 'w') as outfile:
         outfile.write(template.render(context))
+    shutil.copytree(lib_dir, lib_destination)
 
 
 def get_rg_values(sample_name, fastq):
@@ -129,6 +156,31 @@ def get_rg_values(sample_name, fastq):
     rg_vals = "@RG\\tID:" + rgid + "\\tPL:" + rgpl + "\\tLB:" + \
               rglb + "\\tSM:" + rgsm + "\\tCN:" + rgcn + "\\tPU:" + rgpu
     return rg_vals
+
+
+def filter_clusters(bed, min_mean_depth):
+    '''
+    Parses BED file to filter for high coverage regions.
+    '''
+    clusters = defaultdict(lambda: defaultdict(list))
+    with open(bed, 'rU') as bedfile:
+        for line in bedfile:
+            arow = line.strip('\n').split('\t')
+            chrom = arow[0]
+            begin = arow[1]
+            end = arow[1]
+            try:
+                total_depth = int(arow[3])
+                bases_covered = int(arow[5])
+            except ValueError as err:
+                sys.stderr.write(err + "\nError in coverage bed file.\n")
+                sys.exit()
+            if total_depth/float(bases_covered) >= min_mean_depth:
+                clusters[chrom].append((begin, end))
+    return clusters
+
+
+def filter_variants_by_clusters()
 
 
 def map_bams_to_sample(samplename_map, bams, bam_dir):
@@ -194,9 +246,11 @@ def map_variants_to_basename(snps, indels):
     '''
     Maps variants to basename.
     '''
-    snps_map = {re.sub(".indelrealn.snps.vcf", "", f): parse_vcf(f)
+    snps_map = {re.sub(".indelrealn.snps.vcf", "", f): 
+                filter_variants_by_cluster(parse_vcf(f))
                 for f in snps}
-    indels_map = {re.sub(".indelrealn.indels.vcf", "", f): parse_vcf(f)
+    indels_map = {re.sub(".indelrealn.indels.vcf", "", f) :
+                  parse_vcf(f, is_indel=True)
                   for f in indels}
     return snps_map, indels_map
 
@@ -229,9 +283,15 @@ def parse_vcf(vcf, is_indel=False, dry=False):
     '''
     Parses VCFs to a map of select features.
     '''
-    header = ["chrom", "position", "ref allele", "alt allele",
-              "alt freq", "p value", "total depth", "ref_depth",
-              "alt depth"]
+    header = {"chrom": "chrom",
+              "pos": "position",
+              "ref": "ref allele",
+              "alt": "alt allele",
+              "freq": "alt freq",
+              "pval": "p value",
+              "total_depth": "total depth",
+              "ref_depth": "ref depth",
+              "allele_depth": "alt depth"}
     variants = [header]
     with open(vcf, 'rU') as handle:
         for line in handle:
@@ -290,7 +350,7 @@ def realign_indels(bams, ref_genome, bin_map, dry=False):
     return realn_bams
 
 
-def setup_dir(cur_dir, out_dir_name):
+def setup_dir(cur_dir, out_dir_name, dry=False):
     '''
     Sets up output directory in project directory.
     '''
@@ -299,26 +359,29 @@ def setup_dir(cur_dir, out_dir_name):
     if not os.path.isdir(cur_dir):
         sys.stderr.write("Error: project directory path does not exist.\n")
         sys.exit()
-    try:
-        os.makedirs('/'.join([cur_dir, out_dir_name]))
-    except OSError as err:
-        sys.stderr.write("%s\n" % err)
-        sys.stderr.write("Error: output directory already exists.\n")
-        sys.exit()
     out_dir = '/'.join([cur_dir, out_dir_name])
     bam_dir = '/'.join([out_dir, "bam_files"])
     indbam_dir = '/'.join([bam_dir, "individual_bam_files"])
     pileup_dir = '/'.join([out_dir, "pileups"])
     vcf_dir = '/'.join([out_dir, "vcfs"])
     report_dir = '/'.join([out_dir, "report_html"])
-    for folder in [bam_dir, indbam_dir, pileup_dir, vcf_dir, report_dir]:
-        os.makedirs(folder)
+    coverage_dir = '/'.join([out_dir, "coverage"])
+    if not dry:
+        try:
+            for folder in [out_dir, bam_dir, indbam_dir, pileup_dir,
+                           coverage_dir, vcf_dir, report_dir]:
+                os.makedirs(folder)
+        except OSError as err:
+            sys.stderr.write("%s\n" % err)
+            sys.stderr.write("Error: %s directory already exists.\n" % folder)
+            sys.exit()
     return {"bamdir": bam_dir,
             "outdir": out_dir,
             "projdir": cur_dir,
             "indbamdir": indbam_dir,
             "pileupdir": pileup_dir,
             "vcfdir": vcf_dir,
+            "coveragedir": coverage_dir,
             "reportdir": report_dir}
 
 
@@ -343,7 +406,7 @@ def main():
     parser.set_defaults(projectdir=".", outdir="plexout", genome="hg19")
     args = parser.parse_args()
     # Setup process
-    dir_map = setup_dir(args.projectdir, args.outdir)
+    dir_map = setup_dir(args.projectdir, args.outdir, dry=args.dry)
     #bwa = "/ifs/labs/cccb/projects/cccb/apps/bwa-0.7.12/bwa"
     #samtools = "/ifs/labs/cccb/projects/cccb/apps/samtools-1.2-5/samtools"
     #bwa = "~/bin/bwa"
@@ -352,7 +415,8 @@ def main():
                "bwa": "~/bin/bwa",
                "java": "~/bin/java",
                "gatk": "~/bin/gatk.jar",
-               "varscan": "~/bin/varscan.jar",}
+               "varscan": "~/bin/varscan.jar",
+               "bedtools": "~/bin/bedtools"}
     # TODO change ref at later point
     #ref_map = {"hg19": ""}
     indvbams_to_samplename_map = align_reads(dir_map, args.fastqtsv,
@@ -362,9 +426,11 @@ def main():
                              dry=args.dry)
     indelrealn_bams = realign_indels(merged_bams, "hg19.fa", bin_map,
                                      dry=args.dry)
+    _, clusters = cluster_regions(indelrealn_bams, args.mindepth,
+                                     dir_map, bin_map, dry=args.dry)
     snps, indels = call_variants_from_bams(indelrealn_bams, "hg19.fa", dir_map,
                                            bin_map, dry=args.dry)
-    snp_map, indel_map = map_variants_to_basename(snps, indels)
+    snp_map, indel_map = map_variants_to_basename(snps, indels, clusters)
     create_report(snp_map, indel_map, dir_map)
 
 
