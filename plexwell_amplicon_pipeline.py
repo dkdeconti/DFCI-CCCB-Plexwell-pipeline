@@ -180,7 +180,22 @@ def filter_clusters(bed, min_mean_depth):
     return clusters
 
 
-def filter_variants_by_clusters()
+def filter_variants_by_clusters(variants, clusters):
+    '''
+    Filters variants for intersect with clusters.
+    '''
+    return {k : v for k, v in variants.items()
+            if has_any_intersect(v, clusters)}
+
+
+def has_any_intersect(variant, clusters):
+    '''
+    Checks for any intersects between variant and any cluster.
+    '''
+    intersected = False
+    vk = variant["chrom"]
+    vpos = variant["pos"]
+    return vk in clusters and any(cb <= vpos <= ce for cb, ce in clusters[vk])
 
 
 def map_bams_to_sample(samplename_map, bams, bam_dir):
@@ -189,7 +204,8 @@ def map_bams_to_sample(samplename_map, bams, bam_dir):
     '''
     sample_to_bam_map = {}
     for key, value in samplename_map.items():
-        bam = re.sub(r'_R[1-2]_[0-9]+\.fastq.gz', '', key).split('/')[-1] + ".bam"
+        bam = re.sub(r'_R[1-2]_[0-9]+\.fastq.gz', '', key).split('/')[-1] +
+                     ".bam"
         new_key = '/'.join([bam_dir, bam])
         sample_to_bam_map[new_key] = value
     bam_to_sample_map = defaultdict(list)
@@ -242,15 +258,16 @@ def map_read_by_basename(first_reads, basenames_map):
     mapped_fastq.extend(seconds)
     return mapped_fastq
 
-def map_variants_to_basename(snps, indels):
+def map_variants_to_basename(snps, indels, clusters):
     '''
     Maps variants to basename.
     '''
     snps_map = {re.sub(".indelrealn.snps.vcf", "", f): 
-                filter_variants_by_cluster(parse_vcf(f))
+                filter_variants_by_cluster(parse_vcf(f), clusters)
                 for f in snps}
     indels_map = {re.sub(".indelrealn.indels.vcf", "", f) :
-                  parse_vcf(f, is_indel=True)
+                  filter_variants_by_cluster(parse_vcf(f, is_indel=True,
+                                                       clusters))
                   for f in indels}
     return snps_map, indels_map
 
@@ -319,9 +336,6 @@ def parse_vcf(vcf, is_indel=False, dry=False):
                        "total_depth": total_depth,
                        "ref_depth": ref_depth,
                        "allele_depth": allele_depth}
-            #variant = [chrom, pos, ref, alt, freq, pval, total_depth, 
-            #          ref_depth, allele_depth]
-            #sys.stdout.write('\t'.join(variant) + '\n')
             variants.append(variant)
     return variants
 
