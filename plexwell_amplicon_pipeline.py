@@ -8,6 +8,7 @@ import argparse
 import gzip
 import itertools
 import os
+import jinja2
 import re
 import subprocess
 import sys
@@ -53,33 +54,30 @@ def call_variants_from_bams(bams, ref_genome, dir_map, bin_map, dry=False):
     java = bin_map["java"]
     samtools = bin_map["samtools"]
     varscan = bin_map["varscan"]
-    vcfs = []
+    snp_vcfs = []
+    indel_vcfs = []
     for bam in bams:
-        vcf = '/'.join([dir_map["vcfdir"],
-                        re.sub(r"\.bam", ".vcf", bam.split('/')[-1])])
-        #snps = '/'.join([dir_map["vcfdir"],
-        #                 re.sub(r"\.bam", ".snps.vcf", bam.split('/')[-1])])
-        #indels = '/'.join([dir_map["vcfdir"],
-        #                   re.sub(r"\.bam", ".indels.vcf",
-        #                          bam.split('/')[-1])])
-        cmd = ' '.join([samtools, "mpileup -B -f", ref_genome, bam, "|",
-                        java, "-jar", varscan,
-                        "mpileup2cns --p-value 99e-02 --variants 1",
-                        ">", vcf])
-        #cmd1 = ' '.join([samtools, "mpileup -B -f", ref_genome, bam, "|",
-        #                 java, "-jar", varscan,
-        #                 "mpileup2snp --p-value 99e-02", ">", snps])
-        #cmd2 = ' '.join([samtools, "mpileup -B -f", ref_genome, bam, "|",
-        #                 java, "-jar", varscan,
-        #                 "mpileup2indel --p-value 99e-02", ">", indels])
+        snps = '/'.join([dir_map["vcfdir"],
+                         re.sub(r"\.bam", ".snps.vcf", bam.split('/')[-1])])
+        indels = '/'.join([dir_map["vcfdir"],
+                           re.sub(r"\.bam", ".indels.vcf",
+                                  bam.split('/')[-1])])
+        cmd1 = ' '.join([samtools, "mpileup -B -f", ref_genome, bam, "|",
+                         java, "-jar", varscan,
+                         "mpileup2snp --p-value 99e-02 --output-vcf 1",
+                         ">", snps])
+        cmd2 = ' '.join([samtools, "mpileup -B -f", ref_genome, bam, "|",
+                         java, "-jar", varscan,
+                         "mpileup2indel --p-value 99e-02 --output-vcf 1",
+                         ">", indels])
         if dry:
-            #sys.stdout.write(cmd1 + '\n' + cmd2 + '\n')
-            sys.stdout.write(cmd + '\n')
+            sys.stdout.write(cmd1 + '\n' + cmd2 + '\n')
         else:
-            subprocess.call(cmd, shell=True)
-            #subprocess.call(cmd1, shell=True)
-            #subprocess.call(cmd2, shell=True)
-    return vcfs
+            subprocess.call(cmd1, shell=True)
+            subprocess.call(cmd2, shell=True)
+        snp_vcfs.append(snps)
+        indel_vcfs.append(indels)
+    return snp_vcfs, indel_vcfs
 
 
 def create_symlink(root, link_path, filename):
@@ -88,6 +86,19 @@ def create_symlink(root, link_path, filename):
     '''
     os.symlink('/'.join([root, filename]),
                '/'.join([link_path, filename]))
+
+
+def create_report(snps, indels, dir_map):
+    '''
+    Injects data into html template with jinja2.
+    '''
+    proj_dir = dir_map["projdir"]
+    report_dir = dir_map["reportdir"]
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(proj_dir))
+    template = env.get_template("template.html")
+    for variants in 
+    pass
+
 
 def get_rg_values(sample_name, fastq):
     '''
@@ -199,6 +210,38 @@ def merge_bams(bams_to_sample_map, dir_map, bin_map, dry=False):
     return merged_bams
 
 
+def parse_vcf(vcf, is_indel=False, dry=False):
+    '''
+    Parses VCFs to a map of select features.
+    '''
+    header = ["chrom", "position", "ref allele", "alt allele",
+              "alt freq", "p value", "total depth", "ref_depth",
+              "alt depth"]
+    variants = [header]
+    with open(vcf, 'rU') as handle:
+        for line in handle:
+            if line[0] == "#":
+                continue # skip header
+            vrow = line.strip('\n').split('\t')
+            chrom = vrow[0]
+            pos = vrow[1]
+            if is_indel:
+                pos = str(int(vrow[1]) + 1)
+            ref = vrow[3]
+            alt = vrow[4]
+            v_info = vrow[9].split(':')
+            freq = v_info[6]
+            pval = v_info[7]
+            total_depth = v_info[3]
+            ref_depth = v_info[4]
+            allele_depth = v_info[5]
+            variant = [chrom, pos, ref, alt, freq, pval, total_depth, 
+                      ref_depth, allele_depth]
+            #sys.stdout.write('\t'.join(variant) + '\n')
+            variants.append(variant)
+    return variants
+
+
 def realign_indels(bams, ref_genome, bin_map, dry=False):
     '''
     Realigns indels with GATK.
@@ -243,16 +286,17 @@ def setup_dir(cur_dir, out_dir_name):
     indbam_dir = '/'.join([bam_dir, "individual_bam_files"])
     pileup_dir = '/'.join([out_dir, "pileups"])
     vcf_dir = '/'.join([out_dir, "vcfs"])
-    os.makedirs(bam_dir)
-    os.makedirs(indbam_dir)
-    os.makedirs(pileup_dir)
-    os.makedirs(vcf_dir)
+    report_dir = '/'.join([out_dir, "report_html"])
+    for folder in [out_dir, bam_dir, indbam_dir, pileup_dir, vcf_dir,
+                   report_dir]:
+        os.makedirs(folder)
     return {"bamdir": bam_dir,
             "outdir": out_dir,
             "projdir": cur_dir,
             "indbamdir": indbam_dir,
             "pileupdir": pileup_dir,
-            "vcfdir": vcf_dir}
+            "vcfdir": vcf_dir,
+            "reportdir": report_dir}
 
 
 def main():
@@ -287,15 +331,18 @@ def main():
                "gatk": "~/bin/gatk.jar",
                "varscan": "~/bin/varscan.jar",}
     # TODO change ref at later point
-    #ref_map = {"hg19": ""}    
+    #ref_map = {"hg19": ""}
     indvbams_to_samplename_map = align_reads(dir_map, args.fastqtsv,
                                              "hg19.fa", bin_map,
-                                             args.dry)
+                                             dry=args.dry)
     merged_bams = merge_bams(indvbams_to_samplename_map, dir_map, bin_map,
-                             args.dry)
-    indelrealn_bams = realign_indels(merged_bams, "hg19.fa", bin_map, args.dry)
-    call_variants_from_bams(indelrealn_bams, "hg19.fa", dir_map, bin_map,
-                            args.dry)
+                             dry=args.dry)
+    indelrealn_bams = realign_indels(merged_bams, "hg19.fa", bin_map,
+                                     dry=args.dry)
+    snps, indels = call_variants_from_bams(indelrealn_bams, "hg19.fa", dir_map,
+                                           bin_map, dry=args.dry)
+    for snp in snps:
+        parse_vcf(snp)
 
 
 if __name__ == "__main__":
