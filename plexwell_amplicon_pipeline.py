@@ -94,10 +94,15 @@ def create_report(snps, indels, dir_map):
     '''
     proj_dir = dir_map["projdir"]
     report_dir = dir_map["reportdir"]
+    report = '/'.join([report_dir, "html_report.html"])
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(proj_dir))
+    # can't seem to find template.html
     template = env.get_template("template.html")
-    for variants in 
-    pass
+    samples = {samplename : {"snps" : variants, "name": samplename}
+               for samplename, variants in snps.items()}
+    context = {"samples": samples}
+    with open(report, 'w') as outfile:
+        outfile.write(template.render(context))
 
 
 def get_rg_values(sample_name, fastq):
@@ -185,6 +190,16 @@ def map_read_by_basename(first_reads, basenames_map):
     mapped_fastq.extend(seconds)
     return mapped_fastq
 
+def map_variants_to_basename(snps, indels):
+    '''
+    Maps variants to basename.
+    '''
+    snps_map = {re.sub(".indelrealn.snps.vcf", "", f): parse_vcf(f)
+                for f in snps}
+    indels_map = {re.sub(".indelrealn.indels.vcf", "", f): parse_vcf(f)
+                  for f in indels}
+    return snps_map, indels_map
+
 
 def merge_bams(bams_to_sample_map, dir_map, bin_map, dry=False):
     '''
@@ -235,8 +250,17 @@ def parse_vcf(vcf, is_indel=False, dry=False):
             total_depth = v_info[3]
             ref_depth = v_info[4]
             allele_depth = v_info[5]
-            variant = [chrom, pos, ref, alt, freq, pval, total_depth, 
-                      ref_depth, allele_depth]
+            variant = {"chrom": chrom,
+                       "pos": pos,
+                       "ref": ref,
+                       "alt": alt,
+                       "freq": freq,
+                       "pval": pval,
+                       "total_depth": total_depth,
+                       "ref_depth": ref_depth,
+                       "allele_depth": allele_depth}
+            #variant = [chrom, pos, ref, alt, freq, pval, total_depth, 
+            #          ref_depth, allele_depth]
             #sys.stdout.write('\t'.join(variant) + '\n')
             variants.append(variant)
     return variants
@@ -287,8 +311,7 @@ def setup_dir(cur_dir, out_dir_name):
     pileup_dir = '/'.join([out_dir, "pileups"])
     vcf_dir = '/'.join([out_dir, "vcfs"])
     report_dir = '/'.join([out_dir, "report_html"])
-    for folder in [out_dir, bam_dir, indbam_dir, pileup_dir, vcf_dir,
-                   report_dir]:
+    for folder in [bam_dir, indbam_dir, pileup_dir, vcf_dir, report_dir]:
         os.makedirs(folder)
     return {"bamdir": bam_dir,
             "outdir": out_dir,
@@ -341,8 +364,8 @@ def main():
                                      dry=args.dry)
     snps, indels = call_variants_from_bams(indelrealn_bams, "hg19.fa", dir_map,
                                            bin_map, dry=args.dry)
-    for snp in snps:
-        parse_vcf(snp)
+    snp_map, indel_map = map_variants_to_basename(snps, indels)
+    create_report(snp_map, indel_map, dir_map)
 
 
 if __name__ == "__main__":

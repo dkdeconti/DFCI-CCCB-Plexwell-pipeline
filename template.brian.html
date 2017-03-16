@@ -8,7 +8,7 @@
     <meta name="description" content="">
     <meta name="author" content="">
 
-    <title>CCCB Amplicon Variant Calling Service</title>
+    <title>CCCB CRISPR Amplicon Service</title>
 
     <!-- Bootstrap core CSS -->
     <link href="lib/css/bootstrap.min.css" rel="stylesheet">
@@ -36,7 +36,7 @@
 
 	<div id="header_div" class="simple_header">
         		<div>
-            			<span class="left_header">Variant Calling Report</span>
+            			<span class="left_header">CRISPR Sequencing Report</span>
             		</div>
             		<div>
 				<span class="right_header">
@@ -57,7 +57,7 @@
 					  </button>
 					  <button id="sample-choose-main-button" type="button" class="btn btn-primary">Choose sample</button>
 					  <ul class="dropdown-menu">
-						{% for sample in samples %}
+						{% for sample in analyzed_samples %}
 							<li onclick="toggle_func('{{sample.name}}-div');"><a href="#">{{sample.name}}</a></li>
 						{% endfor %}
 					  </ul>
@@ -80,24 +80,20 @@
 						</blockquote>
 					</div>
 				</p>
+				{% for plot in example_plots %}
+				<div class="row">
+					<div class="col-sm-4"><img src="{{plot.image_src}}" class="example-img"></img></div>
+					<div class="col-sm-8">
+						<p>{{plot.description}}</p>
+					</div>
+				</div>
+				{% endfor %}
 			</div>
-			{% for sample in samples %}
+			{% for sample in analyzed_samples %}
 			<div id="{{sample.name}}-div" class="col-sm-10 main-frame hidden-div">
-				<table>
-					{% for variant in sample.snps %}
-						<TR>
-							<TD class="c1">{{variant.chrom}}</TD>
-							<TD class="c2">{{variant.pos}}</TD>
-							<TD class="c3">{{variant.ref}}</TD>
-							<TD class="c4">{{variant.alt}}</TD>
-							<TD class="c5">{{variant.freq}}</TD>
-							<TD class="c6">{{variant.pval}}</TD>
-							<TD class="c7">{{variant.total_depth}}</TD>
-							<TD class="c8">{{variant.ref_depth}}</TD>
-							<TD class="c9">{{variant.allele_depth}}</TD>
-						</TR>
-					{% endfor %}
-				</table>
+				{% for plot in sample.plot_list %}
+					<img src="{{plot.image_src}}" alt="{{plot.description}}" class="output-img"></img>
+				{% endfor %}
 			</div>
 			{% endfor %}
 		</div>
