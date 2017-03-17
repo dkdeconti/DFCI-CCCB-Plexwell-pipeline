@@ -5,8 +5,11 @@ Main entry for plexwell amplicon analysis.
 
 from collections import defaultdict
 import argparse
+import ConfigParser
 import gzip
 import itertools
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -17,12 +20,13 @@ import subprocess
 import sys
 
 
-def align_reads(fastq_tsv, ref_genome, dir_map, bin_map, suffix_map, dry=False):
+def align_reads(fastq_tsv, config, dir_map, dry=False):
     '''
     Aligns reads from fastqs.
     '''
-    bwa = bin_map["bwa"]
-    samtools = bin_map["samtools"]
+    bwa = config.get('Binaries', 'bwa')
+    samtools = config.get('Binaries', 'samtools')
+    ref_genome = config.get('References', 'ref_genome')
     fastq_map = map_fastq_from_tsv(fastq_tsv)
     inverted_fastq_map = dict((v, k) for k in fastq_map for v in fastq_map[k])
     fastqs = itertools.chain.from_iterable(fastq_map.values())
@@ -32,7 +36,8 @@ def align_reads(fastq_tsv, ref_genome, dir_map, bin_map, suffix_map, dry=False):
         sample_name = inverted_fastq_map[first]
         bam_basename = re.sub(r'_R[1-2]_[0-9]+\.fastq.gz',
                               '', first).split('/')[-1]
-        bam = dir_map["indbamdir"] + '/' + bam_basename + suffix_map["bam"]
+        bam = dir_map["indbamdir"] + '/' + bam_basename + \
+              config.get('Suffix', 'bam')
         rg_vals = get_rg_values(sample_name, first)
         cmd = ' '.join([bwa, 'mem -R \"%s\"' % rg_vals,
                         ref_genome, first, second, '|',
@@ -46,19 +51,19 @@ def align_reads(fastq_tsv, ref_genome, dir_map, bin_map, suffix_map, dry=False):
     return bams
 
 
-def call_variants(pileups_map, ref_genome, dir_map, bin_map, suffix_map, dry=False):
+def call_variants(pileups_map, config, dir_map, dry=False):
     '''
     Pipes samtools mpileup of bam to varscan.
     '''
-    java = bin_map["java"]
-    varscan = bin_map["varscan"]
+    java = config.get('Binaries', 'java')
+    varscan = config.get('Binaries', 'varscan')
     snp_map = {}
     indel_map = {}
     for samplename, pileup in pileups_map.items():
         snps = '/'.join([dir_map["vcfdir"],
-                         samplename + suffix_map["snps"]])
+                         samplename + config.get('Suffix', 'snps')])
         indels = '/'.join([dir_map["vcfdir"],
-                           samplename + suffix_map["indels"]])
+                           samplename + config.get('Suffix', 'indels')])
         cmd1 = ' '.join([java, "-jar", varscan, "mpileup2snp", pileup,
                          "--p-value 99e-02 --output-vcf 1", ">", snps])
         cmd2 = ' '.join([java, "-jar", varscan, "mpileup2indel", pileup,
@@ -86,17 +91,16 @@ def cluster_filter(variant_map, cluster_map):
     return filtered_variant_map
 
 
-def cluster_regions(bams_map, min_mean_depth, dir_map, bin_map, suffix_map,
-                    dry=False):
+def cluster_regions(bams_map, min_mean_depth, config, dir_map, dry=False):
     '''
     Determines specific amplicon by min_mean_coverage.
     '''
-    bedtools = bin_map["bedtools"]
+    bedtools = config.get('Binaries', 'bedtools')
     bed_map = {}
     cluster_map = {}
     for samplename, bam in bams_map.items():
         bed = '/'.join([dir_map["coveragedir"],
-                        samplename + suffix_map["coveragebed"]])
+                        samplename + config.get('Suffix', 'coveragebed')])
         cmd = ' '.join([bedtools, "merge -i", bam, "| head -n -1 |",
                         bedtools, "coverage -a - -b", bam, ">", bed])
         if dry:
@@ -260,20 +264,16 @@ def map_fastq_pairs(fastqs):
     return mapped_pairs
 
 
-def merge_bams(indv_bams_map, dir_map, bin_map, suffix_map, dry=False):
+def merge_bams(indv_bams_map, config, dir_map,dry=False):
     '''
     Merges the individual bams into a sample bam.
     '''
     merged_bams = {}
-    try:
-        samtools = bin_map["samtools"]
-    except KeyError as err:
-        sys.stderr.write(err + '\n')
-        sys.exit()
+    samtools = config.get('Binaries', 'samtools')
     for samplename, bams in indv_bams_map.items():
         input_bams = ' '.join(bams)
         output_bam = '/'.join([dir_map["bamdir"], 
-                               samplename + suffix_map["bam"]])
+                               samplename + config.get('Suffix', 'bam')])
         cmd1 = ' '.join([samtools, "merge", output_bam, input_bams])
         cmd2 = ' '.join([samtools, "index", output_bam])
         if dry:
@@ -360,15 +360,16 @@ def parse_vcf(vcf, is_indel=False, dry=False):
     return variants
 
 
-def pileup(bam_map, ref_genome, dir_map, bin_map, suffix_map, dry=False):
+def pileup(bam_map, config, dir_map, dry=False):
     '''
     Creates pileups from bam files with samtools mpileup.
     '''
-    samtools = bin_map["samtools"]
+    samtools = config.get('Binaries', 'samtools')
+    ref_genome = config.get('References', 'ref_genome')
     pileup_map = {}
     for samplename, bam in bam_map.items():
         pileup = '/'.join([dir_map["pileupdir"],
-                           samplename + suffix_map["pileup"]])
+                           samplename + config.get('Suffix', 'pileup')])
         cmd = ' '.join([samtools, "mpileup -B -f", ref_genome, bam,
                         ">", pileup])
         if dry:
@@ -379,14 +380,16 @@ def pileup(bam_map, ref_genome, dir_map, bin_map, suffix_map, dry=False):
     return pileup_map
 
 
-def plot_qc(stats_map, dir_map, suffix_map, dry=False):
+def plot_qc(stats_map, config, dir_map, dry=False):
     '''
     Plots depth and base quality across regions.
     '''
     plot_map = defaultdict(list)
     for samplename, stats in stats_map.items():
         for cluster_key, stat_matrix in stats.items():
-            filename = samplename + "." + cluster_key + suffix_map["qcstats"]
+            filename = samplename + "." + cluster_key + \
+                       config.get('Suffix', 'qcstats')
+            print "DEBUG FILENAME", filename
             plot_file = '/'.join([dir_map["reportdir"], filename])
             pos = stat_matrix[0]
             depth = stat_matrix[1]
@@ -412,19 +415,19 @@ def plot_qc(stats_map, dir_map, suffix_map, dry=False):
     return plot_map
 
 
-def realign_indels(bam_map, ref_genome, dir_map, bin_map, suffix_map,
-                   dry=False):
+def realign_indels(bam_map, config, dir_map, dry=False):
     '''
     Realigns indels with GATK.
     '''
-    java = bin_map["java"]
-    gatk = bin_map["gatk"]
+    java = config.get('Binaries', 'java')
+    gatk = config.get('Binaries', 'gatk')
+    ref_genome = config.get('References', 'ref_genome')
     realn_bams = {}
     for samplename, bam in bam_map.items():
         realn_intervals = dir_map["bamdir"] + '/' + samplename + \
-                          suffix_map["indelrealnintervals"]
+                          config.get('Suffix', 'indelrealnintervals')
         realn_bam = dir_map["bamdir"] + '/' + samplename + \
-                    suffix_map["indelrealn"]
+                    config.get('Suffix', 'indelrealn')
         cmd1 = ' '.join([java, "-jar", gatk, "-T RealignerTargetCreator",
                          "-R", ref_genome, "-I", bam, "-o", realn_intervals])
         cmd2 = ' '.join([java, "-jar", gatk, "-T IndelRealigner",
@@ -516,22 +519,21 @@ def main():
                   "pileup": ".pileup",
                   "qcstats": ".qcstats.png"}
     dir_map = setup_dir(args.projectdir, args.outdir, dry=args.dry)
+    config = ConfigParser.ConfigParser()
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    config.read(os.path.join(script_dir, "config"))
     # Processing
-    indv_bams_map = align_reads(args.fastqtsv, "hg19.fa", dir_map, bin_map,
-                                suffix_map, dry=args.dry)
-    merged_bams_map = merge_bams(indv_bams_map, dir_map, bin_map,
-                                 suffix_map, dry=args.dry)
-    realn_bams_map = realign_indels(merged_bams_map, "hg19.fa", dir_map,
-                                    bin_map, suffix_map, dry=args.dry)
+    indv_bams_map = align_reads(args.fastqtsv, config, dir_map, dry=args.dry)
+    merged_bams_map = merge_bams(indv_bams_map, config, dir_map, dry=args.dry)
+    realn_bams_map = realign_indels(merged_bams_map, config, dir_map,
+                                    dry=args.dry)
     _, cluster_map = cluster_regions(realn_bams_map, int(args.mindepth),
-                                     dir_map, bin_map, suffix_map, dry=args.dry)
-    pileups_map = pileup(realn_bams_map, "hg19.fa", dir_map, bin_map,
-                         suffix_map, dry=args.dry)
+                                     config, dir_map, dry=args.dry)
+    pileups_map = pileup(realn_bams_map, config, dir_map, dry=args.dry)
     stats_map = parse_pileup_for_qc_stats(pileups_map, cluster_map, dir_map,
                                           dry=args.dry)
-    plots_map = plot_qc(stats_map, dir_map, suffix_map, dry=args.dry)
-    snp_vcf_map, indel_vcf_map = call_variants(pileups_map, "hg19.fa",
-                                               dir_map, bin_map, suffix_map,
+    plots_map = plot_qc(stats_map, config, dir_map, dry=args.dry)
+    snp_vcf_map, indel_vcf_map = call_variants(pileups_map, config, dir_map,
                                                dry=args.dry)
     snp_map = {samplename : parse_vcf(vcf, dry=args.dry)
                for samplename, vcf in snp_vcf_map.items()}
