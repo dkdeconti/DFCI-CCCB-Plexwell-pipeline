@@ -7,6 +7,8 @@ from collections import defaultdict
 import argparse
 import gzip
 import itertools
+import matplotlib.pyplot as plt
+import numpy as np
 import os
 import jinja2
 import re
@@ -81,8 +83,6 @@ def cluster_filter(variant_map, cluster_map):
         filtered_variants = [v for i, v in enumerate(variants)
                              if i == 0 or has_intersect(v, clusters)]
         filtered_variant_map[samplename] = filtered_variants
-        print "DEBUG VARIANTS", filtered_variant_map
-        print "DEBUG CLUSTERS", clusters
     return filtered_variant_map
 
 
@@ -108,7 +108,7 @@ def cluster_regions(bams_map, min_mean_depth, dir_map, bin_map, suffix_map,
     return bed_map, cluster_map
 
 
-def create_report(snps, indels, dir_map, dry=False):
+def create_report(snps, indels, plots, dir_map, dry=False):
     '''
     Injects data into html template with jinja2.
     '''
@@ -120,10 +120,10 @@ def create_report(snps, indels, dir_map, dry=False):
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(this_dir))
     # can't seem to find template.html
     template = env.get_template("template.html")
-    print snps
     samples = {samplename : {"header" : snps[samplename][0],
                              "snps" : snps[samplename][1:],
                              "indels" : indels[samplename][1:],
+                             "plots": plots[samplename],
                              "samplename": samplename.split('/')[-1]}
                for samplename in snps.keys()}
     context = {"samples": samples}
@@ -133,7 +133,7 @@ def create_report(snps, indels, dir_map, dry=False):
         shutil.copytree(lib_dir, lib_destination)
 
 
-def filter_clusters(bed, min_mean_depth):
+def filter_clusters(bed, min_depth):
     '''
     Parses BED file to filter for high coverage regions.
     '''
@@ -151,7 +151,7 @@ def filter_clusters(bed, min_mean_depth):
             except ValueError as err:
                 sys.stderr.write(str(err) + "\nError in coverage bed file.\n")
                 sys.exit()
-            if total_depth/float(bases_covered) >= min_mean_depth:
+            if total_depth >= min_depth:
                 #clusters[chrom].append((begin, end))
                 if chrom in clusters:
                     clusters[chrom].append((begin, end))
@@ -186,6 +186,21 @@ def get_rg_values(sample_name, fastq):
     return rg_vals
 
 
+def get_matched_cluster(pos, clusters):
+    '''
+    Produces a key based on which cluster pos resides.
+    '''
+    vk = pos[0]
+    vpos = int(pos[1])
+    for cluster in clusters[vk]:
+        begin = int(cluster[0])
+        end = int(cluster[1])
+        #print "DEBUG VALUES", vk, vpos, begin, end
+        #print "DEBUG TYPES", type(vk), type(vpos), type(begin), type(end)
+        if begin <= vpos <= end:
+            return ("%s:%i-%i" % (vk, begin, end), begin)
+
+
 def has_intersect(variant, clusters):
     '''
     Checks for any intersects between variant and any cluster.
@@ -200,12 +215,11 @@ def has_intersect(variant, clusters):
     return_bool = False
     if vk in clusters:
         for cluster in clusters[vk]:
-            begin = cluster[0]
-            end = cluster[1]
+            begin = int(cluster[0])
+            end = int(cluster[1])
             if begin <= vpos <= end:
                 return_bool = True
                 break
-    print "DEBUG BOOL", return_bool, vk, vpos, clusters
     return return_bool
     # elegance not working...
     #return vk in clusters or (len(clusters[vk]) > 0 
@@ -271,6 +285,37 @@ def merge_bams(indv_bams_map, dir_map, bin_map, suffix_map, dry=False):
     return merged_bams
 
 
+def parse_pileup_for_qc_stats(pileup_map, cluster_map, dir_map, dry=False):
+    '''
+    Parses pileup to output pileup stats.
+    '''
+    stats = {}
+    for samplename, pileup in pileup_map.items():
+        clusters = cluster_map[samplename]
+        stats[samplename] = {}
+        with open(pileup, 'rU') as pileup_file:
+            for line in pileup_file:
+                arow = line.strip('\n').split('\t')
+                chrom = arow[0]
+                pos = int(arow[1])
+                if has_intersect({"chrom": chrom, "pos": pos}, clusters):
+                    cluster_key, start = get_matched_cluster((chrom, pos),
+                                                             clusters)
+                else:
+                    continue
+                if cluster_key not in stats[samplename]:
+                    stats[samplename][cluster_key] = [[], [], [], [], []]
+                adj_pos = pos - start
+                depth = int(arow[3])
+                qual = [ord(c) - 33 for c in arow[5]]
+                mq = np.median(qual)
+                uq = np.percentile(qual, 90)
+                lq = np.percentile(qual, 10)
+                for i, v in enumerate([adj_pos, depth, mq, uq, lq]):
+                    stats[samplename][cluster_key][i].append(v)
+    return stats
+
+
 def parse_vcf(vcf, is_indel=False, dry=False):
     '''
     Parses VCFs to a map of select features.
@@ -332,6 +377,39 @@ def pileup(bam_map, ref_genome, dir_map, bin_map, suffix_map, dry=False):
             subprocess.call(cmd, shell=True)
         pileup_map[samplename] = pileup
     return pileup_map
+
+
+def plot_qc(stats_map, dir_map, suffix_map, dry=False):
+    '''
+    Plots depth and base quality across regions.
+    '''
+    plot_map = defaultdict(list)
+    for samplename, stats in stats_map.items():
+        for cluster_key, stat_matrix in stats.items():
+            filename = samplename + "." + cluster_key + suffix_map["qcstats"]
+            plot_file = '/'.join([dir_map["reportdir"], filename])
+            pos = stat_matrix[0]
+            depth = stat_matrix[1]
+            mq = stat_matrix[2]
+            uq = stat_matrix[3]
+            lq = stat_matrix[4]
+            # Start figure making
+            fig, host = plt.subplots(figsize=(16, 8))
+            par1 = host.twinx()
+            p1 = host.plot(pos, mq, "b-", label="Base Quality")
+            p2 = par1.plot(pos, depth, "r-", label="Depth")
+            host.set_xlabel("Position along %s" % cluster_key)
+            host.set_ylabel("Base quality score")
+            par1.set_ylabel("Depth")
+            host.yaxis.label.set_color("b")
+            par1.yaxis.label.set_color("r")
+            host.tick_params(axis="y", colors="b")
+            par1.tick_params(axis="y", colors="r")
+            lines = [p1, p2]
+            plt.savefig(plot_file)
+            plt.close()
+            plot_map[samplename].append(plot_file)
+    return plot_map
 
 
 def realign_indels(bam_map, ref_genome, dir_map, bin_map, suffix_map,
@@ -420,7 +498,7 @@ def main():
                         action="store_true",
                         help="Creates dirs, but no file creation")
     parser.set_defaults(projectdir=".", outdir="plexout", genome="hg19",
-                        mindepth=200)
+                        mindepth=5000)
     args = parser.parse_args()
     # Set up globally used maps.
     bin_map = {"samtools": "~/bin/samtools",
@@ -435,7 +513,8 @@ def main():
                   "bam": ".bam",
                   "snps": ".snps.vcf",
                   "indels": ".indels.vcf",
-                  "pileup": ".pileup"}
+                  "pileup": ".pileup",
+                  "qcstats": ".qcstats.png"}
     dir_map = setup_dir(args.projectdir, args.outdir, dry=args.dry)
     # Processing
     indv_bams_map = align_reads(args.fastqtsv, "hg19.fa", dir_map, bin_map,
@@ -448,6 +527,9 @@ def main():
                                      dir_map, bin_map, suffix_map, dry=args.dry)
     pileups_map = pileup(realn_bams_map, "hg19.fa", dir_map, bin_map,
                          suffix_map, dry=args.dry)
+    stats_map = parse_pileup_for_qc_stats(pileups_map, cluster_map, dir_map,
+                                          dry=args.dry)
+    plots_map = plot_qc(stats_map, dir_map, suffix_map, dry=args.dry)
     snp_vcf_map, indel_vcf_map = call_variants(pileups_map, "hg19.fa",
                                                dir_map, bin_map, suffix_map,
                                                dry=args.dry)
@@ -457,7 +539,8 @@ def main():
                  for samplename, vcf in indel_vcf_map.items()}
     f_snp_map, f_indel_map = [cluster_filter(m, cluster_map)
                               for m in [snp_map, indel_map]]
-    create_report(f_snp_map, f_indel_map, dir_map)
+    # Create html report.
+    create_report(f_snp_map, f_indel_map, plots_map, dir_map)
 
 
 if __name__ == "__main__":
