@@ -81,6 +81,52 @@
 					</div>
 				</p>
 			</div>
+			<div id="all-div" class=class="col-sm-10 main-frame hidden-div">
+				<table class="table table-striped">
+					<TR>
+						<TD class="c1"><b>sample</b></TD>
+						<TD class="c2"><b>chrom</b></TD>
+						<TD class="c3"><b>position</b></TD>
+						<TD class="c4"><b>ref allele</b></TD>
+						<TD class="c5"><b>alt allele</b></TD>
+						<TD class="c6"><b>alt freq</b></TD>
+						<TD class="c7"><b>p value</b></TD>
+						<TD class="c8"><b>total depth</b></TD>
+						<TD class="c9"><b>ref depth</b></TD>
+						<TD class="c10"><b>alt depth</b></TD>
+					</TR>
+					{% for sample, vardict in samples.iteritems() %}
+						{% for snp in vardict['snps'] %}
+							<TR>
+								<TD class="c1">{{vardict.samplename}}</TD>
+								<TD class="c2">{{snp.chrom}}</TD>
+								<TD class="c3">{{snp.pos}}</TD>
+								<TD class="c4">{{snp.ref}}</TD>
+								<TD class="c5">{{snp.alt}}</TD>
+								<TD class="c6">{{snp.freq}}</TD>
+								<TD class="c7">{{snp.pval}}</TD>
+								<TD class="c8">{{snp.total_depth}}</TD>
+								<TD class="c9">{{snp.ref_depth}}</TD>
+								<TD class="c10">{{snp.allele_depth}}</TD>
+							</TR>
+						{% endfor %}
+						{% for indel in vardict['indels'] %}
+							<TR>
+								<TD class="c2">{{vardict.samplename}}</TD>
+								<TD class="c2">{{indel.chrom}}</TD>
+								<TD class="c3">{{indel.pos}}</TD>
+								<TD class="c4">{{indel.ref}}</TD>
+								<TD class="c5">{{indel.alt}}</TD>
+								<TD class="c6">{{indel.freq}}</TD>
+								<TD class="c7">{{indel.pval}}</TD>
+								<TD class="c8">{{indel.total_depth}}</TD>
+								<TD class="c9">{{indel.ref_depth}}</TD>
+								<TD class="c10">{{indel.allele_depth}}</TD>
+							</TR>
+						{% endfor %}
+					{% endfor %}
+				</table>
+			</div>
 			{% for sample, vardict in samples.iteritems() %}
 			<div id="{{vardict['samplename']}}-div" class="col-sm-10 main-frame hidden-div">
 				{% set header = vardict['header'] %}
