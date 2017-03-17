@@ -14,5 +14,5 @@ snps = .snps.vcf
 indels = .indels.vcf
 pileup = .pileup
 qcstats = .qcstats.png
-[References]
+[hg19]
 ref_genome = hg19.fa

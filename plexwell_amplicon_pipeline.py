@@ -20,13 +20,13 @@ import subprocess
 import sys
 
 
-def align_reads(fastq_tsv, config, dir_map, dry=False):
+def align_reads(fastq_tsv, genome, config, dir_map, dry=False):
     '''
     Aligns reads from fastqs.
     '''
     bwa = config.get('Binaries', 'bwa')
     samtools = config.get('Binaries', 'samtools')
-    ref_genome = config.get('References', 'ref_genome')
+    ref_genome = config.get(genome, 'ref_genome')
     fastq_map = map_fastq_from_tsv(fastq_tsv)
     inverted_fastq_map = dict((v, k) for k in fastq_map for v in fastq_map[k])
     fastqs = itertools.chain.from_iterable(fastq_map.values())
@@ -360,12 +360,12 @@ def parse_vcf(vcf, is_indel=False, dry=False):
     return variants
 
 
-def pileup(bam_map, config, dir_map, dry=False):
+def pileup(bam_map, genome, config, dir_map, dry=False):
     '''
     Creates pileups from bam files with samtools mpileup.
     '''
     samtools = config.get('Binaries', 'samtools')
-    ref_genome = config.get('References', 'ref_genome')
+    ref_genome = config.get(genome, 'ref_genome')
     pileup_map = {}
     for samplename, bam in bam_map.items():
         pileup = '/'.join([dir_map["pileupdir"],
@@ -415,13 +415,13 @@ def plot_qc(stats_map, config, dir_map, dry=False):
     return plot_map
 
 
-def realign_indels(bam_map, config, dir_map, dry=False):
+def realign_indels(bam_map, genome, config, dir_map, dry=False):
     '''
     Realigns indels with GATK.
     '''
     java = config.get('Binaries', 'java')
     gatk = config.get('Binaries', 'gatk')
-    ref_genome = config.get('References', 'ref_genome')
+    ref_genome = config.get(genome, 'ref_genome')
     realn_bams = {}
     for samplename, bam in bam_map.items():
         realn_intervals = dir_map["bamdir"] + '/' + samplename + \
@@ -503,33 +503,21 @@ def main():
     parser.set_defaults(projectdir=".", outdir="plexout", genome="hg19",
                         mindepth=5000)
     args = parser.parse_args()
-    # Set up globally used maps.
-    bin_map = {"samtools": "~/bin/samtools",
-            "bwa": "~/bin/bwa",
-            "java": "~/bin/java",
-            "gatk": "~/bin/gatk.jar",
-            "varscan": "~/bin/varscan.jar",
-            "bedtools": "~/bin/bedtools"}
-    suffix_map = {"indelrealn": ".indelrealn.bam",
-                  "indelrealnintervals": ".indelrealn.intervals",
-                  "coveragebed": ".bed",
-                  "bam": ".bam",
-                  "snps": ".snps.vcf",
-                  "indels": ".indels.vcf",
-                  "pileup": ".pileup",
-                  "qcstats": ".qcstats.png"}
+    # Set up directory map and config.
     dir_map = setup_dir(args.projectdir, args.outdir, dry=args.dry)
     config = ConfigParser.ConfigParser()
     script_dir = os.path.dirname(os.path.realpath(__file__))
     config.read(os.path.join(script_dir, "config"))
     # Processing
-    indv_bams_map = align_reads(args.fastqtsv, config, dir_map, dry=args.dry)
+    indv_bams_map = align_reads(args.fastqtsv, args.genome, config, dir_map,
+                                dry=args.dry)
     merged_bams_map = merge_bams(indv_bams_map, config, dir_map, dry=args.dry)
-    realn_bams_map = realign_indels(merged_bams_map, config, dir_map,
-                                    dry=args.dry)
+    realn_bams_map = realign_indels(merged_bams_map, args.genome, config,
+                                    dir_map, dry=args.dry)
     _, cluster_map = cluster_regions(realn_bams_map, int(args.mindepth),
                                      config, dir_map, dry=args.dry)
-    pileups_map = pileup(realn_bams_map, config, dir_map, dry=args.dry)
+    pileups_map = pileup(realn_bams_map, args.genome, config, dir_map,
+                         dry=args.dry)
     stats_map = parse_pileup_for_qc_stats(pileups_map, cluster_map, dir_map,
                                           dry=args.dry)
     plots_map = plot_qc(stats_map, config, dir_map, dry=args.dry)
