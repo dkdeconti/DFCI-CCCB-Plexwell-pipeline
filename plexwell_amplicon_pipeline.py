@@ -33,7 +33,7 @@ def align_reads(fastq_tsv, genome, config, dir_map, dry=False):
     fastq_pairs = map_fastq_pairs(fastqs)
     bams = defaultdict(list)
     for first, second in fastq_pairs.items():
-        sample_name = inverted_fastq_map[first]
+        sample_name = inverted_fastq_map[first].split('/')[-1]
         bam_basename = re.sub(r'_R[1-2]_[0-9]+\.fastq.gz',
                               '', first).split('/')[-1]
         bam = dir_map["indbamdir"] + '/' + bam_basename + \
@@ -122,12 +122,13 @@ def create_report(snps, indels, plots, dir_map, dry=False):
     lib_destination = os.path.join(report_dir, 'lib')
     report = '/'.join([report_dir, "html_report.html"])
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(this_dir))
-    # can't seem to find template.html
     template = env.get_template("template.html")
     samples = {samplename : {"header" : snps[samplename][0],
                              "snps" : snps[samplename][1:],
                              "indels" : indels[samplename][1:],
-                             "plots": plots[samplename],
+                             "plots": [p.split('\t')[-1]
+                                       for p in plots[samplename]],
+                             "plots": plots[samplename].split('/')[-1],
                              "samplename": samplename.split('/')[-1]}
                for samplename in snps.keys()}
     context = {"samples": samples}
@@ -199,8 +200,6 @@ def get_matched_cluster(pos, clusters):
     for cluster in clusters[vk]:
         begin = int(cluster[0])
         end = int(cluster[1])
-        #print "DEBUG VALUES", vk, vpos, begin, end
-        #print "DEBUG TYPES", type(vk), type(vpos), type(begin), type(end)
         if begin <= vpos <= end:
             return ("%s:%i-%i" % (vk, begin, end), begin)
 
@@ -389,7 +388,6 @@ def plot_qc(stats_map, config, dir_map, dry=False):
         for cluster_key, stat_matrix in stats.items():
             filename = samplename + "." + cluster_key + \
                        config.get('Suffix', 'qcstats')
-            print "DEBUG FILENAME", filename
             plot_file = '/'.join([dir_map["reportdir"], filename])
             pos = stat_matrix[0]
             depth = stat_matrix[1]
