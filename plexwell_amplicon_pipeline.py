@@ -29,7 +29,7 @@ def align_reads(fastq_tsv, genome, config, dir_map, dry=False):
     ref_genome = config.get(genome, 'ref_genome')
     fastq_map = map_fastq_from_tsv(fastq_tsv)
     inverted_fastq_map = dict((v, k) for k in fastq_map for v in fastq_map[k])
-    fastqs = itertools.chain.from_iterable(fastq_map.values())
+    fastqs = list(itertools.chain.from_iterable(fastq_map.values()))
     fastq_pairs = map_fastq_pairs(fastqs)
     bams = defaultdict(list)
     for first, second in fastq_pairs.items():
@@ -249,7 +249,7 @@ def map_fastq_pairs(fastqs):
     '''
     first_read_fastqs = [f for f in fastqs if re.search("_R1_", f)]
     second_read_fastqs = [f for f in fastqs if re.search("_R2_", f)]
-    basename_second_map = {f.replace("_R2_", "") : f 
+    basename_second_map = {f.replace("_R2_", "") : f
                            for f in second_read_fastqs}
     mapped_pairs = {f : basename_second_map[f.replace("_R1_", "")]
                     for f in first_read_fastqs
@@ -257,7 +257,7 @@ def map_fastq_pairs(fastqs):
     first_only = {f : "" for f in first_read_fastqs
                   if f.replace("_R1_", "") not in basename_second_map}
     second_only = {f : "" for f in second_read_fastqs
-                   if f.replace("_R2_", "" not in mapped_pairs)}
+                   if re.sub('_R2_', '_R1_', f) not in mapped_pairs}
     mapped_pairs.update(first_only)
     mapped_pairs.update(second_only)
     return mapped_pairs
