@@ -29,6 +29,12 @@
 			$("#" + divId).toggle();
 			current_div = divId;
 		}
+		function toggle_reset(){
+            console.log(current_div);
+            $("#" + current_div).hide();
+            $("#all-div").toggle();
+            current_div = 'all-div';
+        }
 	</script>
 
   </head>
@@ -51,12 +57,15 @@
 			<div class="col-sm-2 sidebar">
 					<!-- Split button -->
 					<div class="wrapper-div">
-					<div class="btn-group">
+                    <div class="btn-reset" style="float: left; margin-right: 5px">
+                        <button onclick="toggle_reset();" id="reset-view" type="button" class="btn btn-primary">Overview</button>
+                    </div>
+					<div class="btn-group" style="float: left">
 					  <button id="sample-choose-dropdown" type="button" class="btn btn-primary dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
 						<span class="caret"></span>
 						<span class="sr-only">Toggle Dropdown</span>
 					  </button>
-					  <button id="sample-choose-main-button" type="button" class="btn btn-primary">Choose sample</button>
+					  <button id="sample-choose-main-button" type="button" class="btn btn-primary">Samples</button>
 					  <ul class="dropdown-menu">
 						{% for sample, vardict in samples.iteritems() %}
 							<li onclick="toggle_func('{{vardict['samplename']}}-div');"><a href="#">{{vardict['samplename']}}</a></li>
@@ -65,7 +74,7 @@
 					</div>
 					</div>
 
-		            <div onclick="toggle_func('about-div');" class="clickable-div">
+		            <div onclick="toggle_func('about-div');" class="clickable-div" style="clear: both;">
 		            	<span class="glyphicon glyphicon-question-sign" aria-hidden="true" style="padding-right:5px;"></span>
 						About  
 		            </div>
@@ -83,7 +92,7 @@
 				</p>
 			</div>
 			<div id="all-div" class=class="col-sm-10 main-frame hidden-div">
-				<table class="table table-striped">
+				<table class="table">
 					<TR>
 						<TD class="c1"><b>sample</b></TD>
 						<TD class="c2"><b>chrom</b></TD>
@@ -97,46 +106,41 @@
 						<TD class="c10"><b>alt depth</b></TD>
 					</TR>
 					{% for sample, vardict in samples.iteritems() %}
-						{% for snp in vardict['snps'] %}
-							<TR>
-								<TD class="c1">{{vardict.samplename}}</TD>
-								<TD class="c2">{{snp.chrom}}</TD>
-								<TD class="c3">{{snp.pos}}</TD>
-								<TD class="c4">{{snp.ref}}</TD>
-								<TD class="c5">{{snp.alt}}</TD>
-								<TD class="c6">{{snp.freq}}</TD>
-								<TD class="c7">{{snp.pval}}</TD>
-								<TD class="c8">{{snp.total_depth}}</TD>
-								<TD class="c9">{{snp.ref_depth}}</TD>
-								<TD class="c10">{{snp.allele_depth}}</TD>
-							</TR>
-						{% endfor %}
-						{% for indel in vardict['indels'] %}
-							<TR>
-								<TD class="c2">{{vardict.samplename}}</TD>
-								<TD class="c2">{{indel.chrom}}</TD>
-								<TD class="c3">{{indel.pos}}</TD>
-								<TD class="c4">{{indel.ref}}</TD>
-								<TD class="c5">{{indel.alt}}</TD>
-								<TD class="c6">{{indel.freq}}</TD>
-								<TD class="c7">{{indel.pval}}</TD>
-								<TD class="c8">{{indel.total_depth}}</TD>
-								<TD class="c9">{{indel.ref_depth}}</TD>
-								<TD class="c10">{{indel.allele_depth}}</TD>
-							</TR>
-						{% endfor %}
+						{% if vardict['variants']|length > 0 %}
+							{% for snp in vardict['variants'] %}
+								<TR>
+									<TD class="c1">{{vardict.samplename}}</TD>
+									<TD class="c2">{{snp.chrom}}</TD>
+									<TD class="c3">{{snp.pos}}</TD>
+									<TD class="c4">{{snp.ref}}</TD>
+									<TD class="c5">{{snp.alt}}</TD>
+									<TD class="c6">{{snp.freq}}</TD>
+									<TD class="c7">{{snp.pval}}</TD>
+									<TD class="c8">{{snp.total_depth}}</TD>
+									<TD class="c9">{{snp.ref_depth}}</TD>
+									<TD class="c10">{{snp.allele_depth}}</TD>
+								</TR>
+							{% endfor %}
+							<TR style="height: 5px; border-top: 5px solid lightgrey"></TR>
+						{% endif %}
 					{% endfor %}
 				</table>
 			</div>
 			{% for sample, vardict in samples.iteritems() %}
 			<div id="{{vardict['samplename']}}-div" class="col-sm-10 main-frame hidden-div">
+				<h3>{{vardict['samplename']}}</h3>
+				<h4>
+					<a href="{{vardict['bamfile']}}">Bam file</a><br>
+					<a href="{{vardict['snpvcf']}}">SNPs VCF file</a><br>
+					<a href="{{vardict['indelvcf']}}">Indels VCF file</a><br>
+				</h4>
 				{% for plot in vardict['plots'] %}
 					<div class="row">
 						<div class="col-sm-4"><img src="{{plot}}" class="example-img"></img></div>
 					</div>
 				{% endfor %}
 				{% set header = vardict['header'] %}
-				<table class="table table-striped">
+				<table class="table">
 					<TR>
 						<TD class="c1"><b>{{header.chrom}}</b></TD>
 						<TD class="c2"><b>{{header.pos}}</b></TD>
@@ -148,7 +152,7 @@
 						<TD class="c8"><b>{{header.ref_depth}}</b></TD>
 						<TD class="c9"><b>{{header.allele_depth}}</b></TD>
 					</TR>
-					{% for snp in vardict['snps'] %}
+					{% for snp in vardict['variants'] %}
 						<TR>
 							<TD class="c1">{{snp.chrom}}</TD>
 							<TD class="c2">{{snp.pos}}</TD>
@@ -159,19 +163,6 @@
 							<TD class="c7">{{snp.total_depth}}</TD>
 							<TD class="c8">{{snp.ref_depth}}</TD>
 							<TD class="c9">{{snp.allele_depth}}</TD>
-						</TR>
-					{% endfor %}
-					{% for indel in vardict['indels'] %}
-						<TR>
-							<TD class="c1">{{indel.chrom}}</TD>
-							<TD class="c2">{{indel.pos}}</TD>
-							<TD class="c3">{{indel.ref}}</TD>
-							<TD class="c4">{{indel.alt}}</TD>
-							<TD class="c5">{{indel.freq}}</TD>
-							<TD class="c6">{{indel.pval}}</TD>
-							<TD class="c7">{{indel.total_depth}}</TD>
-							<TD class="c8">{{indel.ref_depth}}</TD>
-							<TD class="c9">{{indel.allele_depth}}</TD>
 						</TR>
 					{% endfor %}
 				</table>

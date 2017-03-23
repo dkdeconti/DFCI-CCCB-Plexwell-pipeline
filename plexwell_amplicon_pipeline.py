@@ -112,7 +112,8 @@ def cluster_regions(bams_map, min_mean_depth, config, dir_map, dry=False):
     return bed_map, cluster_map
 
 
-def create_report(snps, indels, plots, dir_map, dry=False):
+def create_report(snps, indels, snp_vcfs, indel_vcfs, bams, plots, dir_map,
+                  dry=False):
     '''
     Injects data into html template with jinja2.
     '''
@@ -123,13 +124,20 @@ def create_report(snps, indels, plots, dir_map, dry=False):
     report = '/'.join([report_dir, "html_report.html"])
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(this_dir))
     template = env.get_template("template.html")
+    for vcf, samplename in snp_vcfs.items():
+        print vcf, samplename
     samples = {samplename : {"header" : snps[samplename][0],
-                             "snps" : snps[samplename][1:],
-                             "indels" : indels[samplename][1:],
-                             "plots": [p.split('\t')[-1]
+                             "variants": snps[samplename][1:] + \
+                                         indels[samplename][1:],
+                             "plots": [p.split('/')[-1]
                                        for p in plots[samplename]],
-                             "plots": plots[samplename].split('/')[-1],
-                             "samplename": samplename.split('/')[-1]}
+                             "samplename": samplename.split('/')[-1],
+                             "bamfile": os.path.relpath(bams[samplename],
+                                                        dir_map["reportdir"]),
+                             "snpvcf": os.path.relpath(snp_vcfs[samplename],
+                                                       dir_map["reportdir"]),
+                             "indelvcf": os.path.relpath(indel_vcfs[samplename],
+                                                         dir_map["reportdir"])}
                for samplename in snps.keys()}
     context = {"samples": samples}
     if not dry:
@@ -528,7 +536,8 @@ def main():
     f_snp_map, f_indel_map = [cluster_filter(m, cluster_map)
                               for m in [snp_map, indel_map]]
     # Create html report.
-    create_report(f_snp_map, f_indel_map, plots_map, dir_map)
+    create_report(f_snp_map, f_indel_map, snp_vcf_map, indel_vcf_map,
+                  merged_bams_map, plots_map, dir_map)
 
 
 if __name__ == "__main__":
