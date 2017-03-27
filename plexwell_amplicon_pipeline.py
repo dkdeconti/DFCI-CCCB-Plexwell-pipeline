@@ -65,9 +65,9 @@ def call_variants(pileups_map, config, dir_map, dry=False):
         indels = '/'.join([dir_map["vcfdir"],
                            samplename + config.get('Suffix', 'indels')])
         cmd1 = ' '.join([java, "-jar", varscan, "mpileup2snp", pileup,
-                         "--p-value 99e-02 --output-vcf 1", ">", snps])
+                         "--p-value 90e-02 --output-vcf 1", ">", snps])
         cmd2 = ' '.join([java, "-jar", varscan, "mpileup2indel", pileup,
-                         "--p-value 99e-02 --output-vcf 1", ">", indels])
+                         "--p-value 90e-02 --output-vcf 1", ">", indels])
         if dry:
             sys.stdout.write(cmd1 + '\n' + cmd2 + '\n')
         else:
